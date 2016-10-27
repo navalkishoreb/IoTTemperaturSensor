@@ -1,0 +1,1 @@
+This is Talentica temperature sensor design project.
