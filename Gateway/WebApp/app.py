@@ -1,0 +1,311 @@
+#!/usr/bin/python
+from flask import Flask, render_template, request, json, redirect, session, send_from_directory
+from flaskext.mysql import MySQL
+from hashing_passwords import make_hash,check_hash
+import config_mysql
+import serial_read as publisher
+import os.path
+import subprocess
+import atexit
+
+app = Flask(__name__)
+app.secret_key = "Hello_this_is_a_secret_key"
+
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 3600
+mysql = MySQL()
+
+app.config['MYSQL_DATABASE_USER']=config_mysql.USER
+app.config['MYSQL_DATABASE_PASSWORD'] = config_mysql.PASSWORD
+app.config['MYSQL_DATABASE_DB']= config_mysql.DATABASE
+app.config['MYSQL_DATABASE_HOST']=config_mysql.HOST
+app.config['MYSQL_DATABASE_PORT'] = config_mysql.PORT
+
+
+mysql.init_app(app)
+
+PATH_TO_CREDENTIALS = os.path.join(app.root_path,"userData/credentials")
+PATH_TO_SENSOR_DATA = os.path.join(app.root_path,"userData/sensorData")
+
+
+@app.route("/")
+def main():
+	return render_template('index.html')
+
+@app.route("/favicon.ico")
+def favicon():
+	return send_from_directory(os.path.join(app.root_path,"static"),"favicon.ico")
+
+@app.route("/showSignUp")
+def showSignUp():
+	return render_template('signup.html')
+
+@app.route("/showSignIn")
+def showSignIn():
+	return render_template('signin.html')
+
+
+
+
+@app.route("/signUp",methods=["POST"])
+def signup():
+	conn = mysql.connect()
+	try:	
+		_username = request.form["inputName"]
+		_password = request.form["inputPassword"]
+		print ('serving signup request for...')
+		if _username:
+			print 'for USER: '+_username
+		else:
+			print 'username is NULL'
+		
+		if _username and _password:
+			cursor = conn.cursor()
+			_hashed_password = make_hash(_password)
+			cursor.callproc('sp_createUser',(_username,_hashed_password,0))
+			data = cursor.fetchall()
+
+			if len(data) is 0:
+				conn.commit()
+				return json.dumps({'message':'User created successfully'})
+			else:
+				return json.dumps({'error':str(data[0])})
+		else:
+			return json.dumps({'html':'<span>Enter the required fields</span>'})
+	except Exception as e:
+		return json.dumps({'error':str(e)})
+	finally:
+		conn.close()
+
+
+def saveUserCredentials(username,password):
+	print "saving user credentials..."
+	try:
+		with open(PATH_TO_CREDENTIALS,"w+") as file:
+			file.write(username +","+password)
+			file.close()
+		print "credential saved at "+file.name
+	except Exception as e:
+		print str(e)
+	except IOError as io:
+		print str(io)
+
+
+@app.route("/validateLogin",methods=["POST"])
+def validateLogin():
+	print "validating user..."
+	conn = mysql.connect()
+	try:
+		_username = request.form["inputName"]
+		_password = request.form["inputPassword"]
+		if _username and _password:
+			print "performing sigin operation: USER["+_username+"] Password["+_password+"]"
+			cursor = conn.cursor()
+			cursor.callproc('sp_validateLogin',(_username,))
+		
+			data = cursor.fetchall()
+		
+			if len(data) > 0 :
+				print str(data)
+				if check_hash(_password,data[0][2]):
+					session["user"] = data[0][0]
+					session["username"] = _username
+					saveUserCredentials(_username,_password)
+					return redirect("/userHome")
+					#return json.dumps({'message':"User is successfully logged in..."})
+				else:
+					#redirect("/showSignIn")
+					return render_template("error.html",error="Username or password is wrong!!")
+					#return json.dumps({'error':"Username or Password is wrong!!"})
+			
+			else:
+				return render_template("error.html",error="Username not found!!")
+				#return json.dumps({'error':"Username not found!!"})
+		else:
+			return render_template("error.html",error="Enter valid data")	
+                      # return json.dumps({'error':"Enter valid data"}) 
+		
+	except Exception as e:
+		print "Exception"
+		return render_template("error.html",error=str(e))
+		#return json.dumps({'error':str(e)})
+	finally:
+		conn.close()
+
+		
+
+@app.route("/userHome" , methods=["GET"])
+def userHome():
+	if session.get("user"):
+		print "showing userHome"
+		return render_template("userHome.html")
+	else:
+		return render_template("error.html",error="Unauthorized access")
+
+
+@app.route("/showAddSensor",methods=["GET"])
+def showAddSensor():
+	if session.get("user"):
+		return render_template("addSensor.html");
+	else:
+		return render_template("error.html",error="Unauthorized access")
+
+
+def saveSensorData(_sensorId,_sensorTopic,_readWrite):
+	print "saving sensor data...",
+	print " sensorId: ",
+	print _sensorId,
+	print " topic: ",
+	print _sensorTopic,
+	print " readWrite: ",
+	print _readWrite
+	try:
+		with open(PATH_TO_SENSOR_DATA, 'a') as file:
+			file.write(_sensorId+","+_sensorTopic+","+_readWrite+"\n");
+			file.close()
+	except:
+		print "error occured"	
+
+@app.route("/addSensor",methods=["POST"])
+def addSensor():
+	if session.get("user"):
+		try:
+			_sensorId = request.form["sensorId"]
+			_sensorTopic = request.form["sensorTopic"]
+			_readWrite = request.form["readWrite"]	
+			if _sensorId and _sensorTopic:
+				print "sensorId: "+_sensorId+" sensorTopic: "+_sensorTopic
+				conn = mysql.connect()	
+				cursor = conn.cursor()
+				_username = session.get("username")
+				cursor.callproc('sp_insertacl',(_username,_sensorTopic,_readWrite))
+				data = cursor.fetchall()
+				if len(data) is 0:
+					conn.commit()
+					saveSensorData(_sensorId,_sensorTopic,_readWrite)
+					return redirect("/userHome")
+				else:
+					return render_template("error.html",error="some error occurred")
+	
+			else:
+				return render_template("error.html",error = "Not valid data")	
+	
+		except Exception as e:
+			print "exception "+str(e)
+			return render_template("error.html",error = str(e))		
+		finally:
+			cursor.close()
+			conn.close()
+		
+	
+	else:
+		return render_template("error.html", error = "Unauthorized access")
+
+
+def getSensorDataFromCloud():
+	print "fetching sensor data from cloud..."
+	topicDict = []
+	_username = session.get("username")
+	try:
+		conn = mysql.connect()
+		cursor = conn.cursor()
+                cursor.callproc('sp_getTopics',(_username,))
+                topics = cursor.fetchall()
+                topicDict =[]
+                for topic in topics:
+	                topicObject = {
+				"sensorId":"",
+                                "topic":topic[0],
+                                "readWrite":topic[1]
+                                }
+                        topicDict.append(topicObject)
+	except:
+		print "error fetching from cloud"
+	print "Cloud Data: ",
+	print topicDict
+	return topicDict
+
+def getSavedSensorData():
+	print "fetching saved sensor data..."
+	topicDict = []
+	try:
+		with open(PATH_TO_SENSOR_DATA,'r') as file:
+			for line in file:
+				data =line.split(',')
+				topicObject = {
+						"sensorId":data[0],
+						"topic":data[1],
+						"readWrite":data[2]
+						}
+				topicDict.append(topicObject)
+	except Exception as e:
+		print str(e)
+
+	print "Local Data: ",
+	print topicDict
+	return topicDict
+
+
+def compareSensorData():
+	print "comparing cloud and local data..."
+	topicFromCloud = getSensorDataFromCloud()
+	topicFromLocal = getSavedSensorData()
+	flag = False
+			
+	
+	if tuple(topicFromCloud) == tuple(topicFromLocal):
+		print "Correct sensor data"
+		return topicFromLocal			
+	else:
+		print "There is some insconsistencies in data between cloud and local"
+	
+@app.route("/getTopics", methods=["GET"])
+def getTopics():
+	print "fetching topics..."
+	try:
+		print "user id "+str(session.get("user"))
+		if session.get("user"):
+			topicDict = getSavedSensorData()
+			return json.dumps(topicDict)
+		else:
+			print "user is not authorized"
+			return json.dumps({"error":"Unauthorized access"})
+	except Exception as e:
+		print "exception occured: "+str(e)
+		return json.dumps({"error":str(e)})
+	#finally:
+		#cursor.close()
+		#conn.close()
+
+@app.route("/logout", methods=["GET"])
+def logout():
+	session.pop("user",None)
+	return redirect("/")
+
+@app.route("/launchPublisher", methods=["POST"])
+def launchPublisher():
+	if session.get("user") and os.path.isfile(PATH_TO_SENSOR_DATA):
+		print "launching publisher..."
+		try:
+			print "creating command..."
+			command = "screen -d -m -S serialUART -t serialUART python "+os.path.join(app.root_path,"serial_read.py")
+			print command
+			print "forking subprocess..."
+			p = subprocess.Popen(command,shell=True)
+			print "publisher launched."
+			atexit.register(p.kill)
+			print "subprocess id "+str(p.pid)
+			return json.dumps({"response":"publisher launched"})
+		except Exception as e:
+			print "Error on launching publisher: "+str(e)
+			return	json.dumps({"error":str(e)})
+	else:
+		print "either user or sensor data not available."
+		return json.dumps({"error":"there is some problem"})
+
+if __name__ == "__main__":
+	try:
+		app.run(debug = True)
+	except Exception as e:
+		print "Error occured "+str(e)
+	finally:
+		print "quitting web framework"
