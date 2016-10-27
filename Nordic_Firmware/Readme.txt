@@ -1,0 +1,1 @@
+This is the folder to hold the firmware for Nordic nRF51822 chips, to act as temperature sensor.
