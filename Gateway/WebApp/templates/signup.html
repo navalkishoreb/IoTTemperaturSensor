@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title>Python Flask Bucket List App</title>
+    <title>Temperature Sensor</title>
  
     
     <link href="http://getbootstrap.com/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -24,19 +24,18 @@
             <li role="presentation" class="active"><a href="/showSignUp">Sign Up</a></li>
           </ul>
         </nav>
-        <h3 class="text-muted">Python Flask App</h3>
+        <h3 class="text-muted">Temperature Sensor</h3>
       </div>
  
       <div class="jumbotron">
-        <h1>MQTT App</h1>
-        <form class="form-signin">
+        <form class="form-signin" action="/signUp" method="POST">
         <label for="inputName" class="sr-only">Username</label>
         <input type="name" name="inputName" id="inputName" class="form-control" placeholder="Username" required autofocus>
         <label for="inputPassword" class="sr-only">Password</label>
         <input type="password" name="inputPassword" id="inputPassword" class="form-control" placeholder="Password" required>
         
          
-        <button id="btnSignUp" class="btn btn-lg btn-primary btn-block" type="button">Sign up</button>
+        <button id="btnSignUp" class="btn btn-lg btn-primary btn-block" type="submit">Sign up</button>
       </form>
       </div>
  
