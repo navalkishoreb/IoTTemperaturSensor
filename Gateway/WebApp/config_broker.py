@@ -1,4 +1,15 @@
-MQTT_HOST = "172.29.4.17"
+HOST_LOCAL = "172.29.4.17"
+HOST = "al1c3qhhomyi0.iot.us-west-2.amazonaws.com"
 PORT = 8883
+TOPIC = "/room/kitchen/temperature"
+TOPIC_LIVING_TEMP = "/room/living/temperature"
+USER_NAME = "gateway"
+PASSWORD = "secret"
 KEEP_ALIVE =10
-QOS = 2
+QOS = 1
+rootPath = "/root/aws_iot/keys2/"
+CA_PATH = rootPath+"aws.pem.crt"
+CERT = rootPath+"thing.pem.crt"
+KEY = rootPath+"private.pem.key"
+TLS = 2
+CLIENT_ID = "gateway"

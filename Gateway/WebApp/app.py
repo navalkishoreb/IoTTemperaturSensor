@@ -1,6 +1,7 @@
 #!/usr/bin/python
 from flask import Flask, render_template, request, json, redirect, session, send_from_directory, url_for
 from flaskext.mysql import MySQL
+from flask_script import Manager
 from hashing_passwords import make_hash,check_hash
 import config_mysql
 import serial_read as publisher
@@ -14,6 +15,7 @@ app.secret_key = "Hello_this_is_a_secret_key"
 
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 10
 mysql = MySQL()
+manager = Manager(app)
 
 app.config['MYSQL_DATABASE_USER']=config_mysql.USER
 app.config['MYSQL_DATABASE_PASSWORD'] = config_mysql.PASSWORD
@@ -375,7 +377,8 @@ def launchPublisher():
 
 if __name__ == "__main__":
 	try:
-		app.run(debug = True)
+#		app.run(debug = True)
+		manager.run()
 	except Exception as e:
 		print "Error occured "+str(e)
 	finally:

@@ -1,67 +1,44 @@
-#!/usr/bin/python
-import time
+from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
 import serial
-import socket
-import requests
-import sys
-import paho.mqtt.client as mqtt
-import config_broker as broker
-import threading
+import config_broker as config
 import config_rootPath as path
-from multiprocessing import Process
-import os
-threadLock = threading.Lock()
-client = mqtt.Client()
+import json
 
 sensorDataPath = path.ROOT_PATH + path.SENSOR_DATA
 credentialsPath = path.ROOT_PATH + path.CREDENTIALS
 
-"""usb = serial.Serial(
-    port='/dev/ttyACM0',\
-    baudrate=115200,\
-    parity=serial.PARITY_NONE,\
-    stopbits=serial.STOPBITS_ONE,\
-    bytesize=serial.EIGHTBITS,\
-    timeout=0)
-"""
+message = {"value":0,
+        "sensorId":"UNKNOWN",
+        "topic": "/room/kitchen/temp",
+        "sensor_type": "TEMP",
+        "user_id":1902890023
+        }
 
-def getUARTSerial():
-	return serial.Serial(
-	    port='/dev/ttyAMA0',
-	    baudrate = 9600,
-	    parity=serial.PARITY_NONE,
-	    stopbits=serial.STOPBITS_ONE,
-	    bytesize=serial.EIGHTBITS,
-	    timeout=0
-	    )
+print "\ncreating iot client with id: "+config.CLIENT_ID
+client = AWSIoTMQTTClient(config.CLIENT_ID)
 
+print "\n-------------configuration--------------"
+print "ca_certs: %r" % (config.CA_PATH)
+print "certfile: %r" % config.CERT
+print "keyfile: %r" % config.KEY
+print "host: "+config.HOST
+print "port: "+str(config.PORT)
+print "-----------------------------------------"
 
-def on_connect(client, userdata, flags,resultCode):
-	print("connected with result code "+str(resultCode))
-	if resultCode == 0:
-		threadLock.release()
-	else:
-		print "Not connecting. Authentication failed."
-#	client.publish("room/temperature/status","online",2,True)
+client.configureEndpoint(config.HOST,config.PORT)
+client.configureCredentials(config.CA_PATH,config.KEY,config.CERT)
+print "AWS IOT client is set."
 
-def on_message(client, userdata, messsage):
-	print(message.topic+" : "+str(message.payload))
-
-
-def printInHexFormat(binData):
-	for ch in binData:
-		print '0x%0*X'%(2,ord(ch)),
-	print("")
-
-def sendTemperatureToServer(temp):
-	r=requests.get("http://api.thingspeak.com/update?key=9W55W474GLEBNBLC&field1="+str(ord(temp)))
-	print 'sending...'+ str(r.status_code) +" -- "+ str(r.json())
-
-
-
-def publishTemperature(topic,temp):
+def publishTemperature(topic,temp,sensorId):
 	try:
-		client.publish(topic,str(temp))
+			message["value"] = temp
+			message["sensorId"] = sensorId
+                        print "submitting value..."
+                        result = client.publish(config.TOPIC, json.dumps(message), config.QOS)
+                        if result:
+                                print "published successfully."
+                        else:
+                                print "message not published"
 	except Exception as e:
 		print "Problem while publishing temperature"
 		print str(e)
@@ -113,6 +90,11 @@ def getTemperatureFromData(data):
 		return temperature
 
 
+def printInHexFormat(binData):
+	for ch in binData:
+		print '0x%0*X'%(2,ord(ch)),
+	print("")
+
 def displayReceivedData(data):
 	try:	
 		print "_____________________Received Data___________________________"
@@ -146,12 +128,21 @@ def getAssociatedTopic(sensorId):
 		print "error while fetching associated topic."
 		print str(e)
 	finally:
-		return topic
+		return topic 
+
+def getUARTSerial():
+	return serial.Serial(
+	    port='/dev/ttyAMA0',
+	    baudrate = 9600,
+	    parity=serial.PARITY_NONE,
+	    stopbits=serial.STOPBITS_ONE,
+	    bytesize=serial.EIGHTBITS,
+	    timeout=0
+	)
 
 def startObserving():
 	try: 	
 		print "wating client to connect..."
-		threadLock.acquire()
 		sensorTopicDict = fetchSensorData()
 		print "creating UART serial..."
 		ser = getUARTSerial()
@@ -164,12 +155,11 @@ def startObserving():
 			data= ser.readline()
 			if(data != '') and (data !="\n") and len(data)==8:
 				displayReceivedData(data)
-#				sendTemperatureToServer(data[-1:])
 				sensorId = getSensorId(data[2:6])
 				topic = getAssociatedTopic(sensorId)
 				if topic:
 					temperature = getTemperatureFromData(data[6:8])
-					publishTemperature(topic,temperature)
+					publishTemperature(topic,temperature,sensorId)
 					newLine = True;
 				else:
 					print "please, associate topic to this sensor."
@@ -185,41 +175,15 @@ def startObserving():
 
 
 
-def fetchCredentials():
-	credentials= open(credentialsPath,'r')
-	data = credentials.read().rstrip("\n").split(",")
-	return data
-	 
-
 def  init():
-        try:
-		client.on_connect = on_connect
-		client.on_message = on_message
-		data = fetchCredentials()
-		_username = data[0]
-		_password = data[1]
-		if _username and _password:
-			print "Username: "+_username,
-			print "Password: "+_password
-			client.username_pw_set(_username,_password)
-	                client.connect(broker.MQTT_HOST,broker.PORT,broker.KEEP_ALIVE)
-			print "starting client loop..."
-			client.loop_start()
-			threadLock.acquire()
+        try:		
+			client.connect()
 			startObserving()
-        	        
-		else:
-			print "credentials file exists, but contains no data"
-			exit()
         except Exception as e:
                 print "Not able to connect to broker."
 		print str(e)	
 
-def info(title):
-	print(title)
-	print('module name:', __name__)
-	print('parent process:', os.getppid())
-	print('process id:', os.getpid())
+
 
 if __name__ == "__main__":
 	init()

@@ -1,5 +1,2 @@
-6650BFA4,/room/kitchen/temperature,2
-6246C211,/room/living/temperature,2
-6DF531F2,/room/bedroom/temperature,2
-B82D27C3,/room/lobby/temperature,2
-52838940,/room/garage/temperature,2
+6DF531F2,,
+6DF531F2,/room/kitchen/temperature,2
