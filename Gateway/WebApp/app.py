@@ -1,18 +1,21 @@
 #!/usr/bin/python
-from flask import Flask, render_template, request, json, redirect, session, send_from_directory
+from flask import Flask, render_template, request, json, redirect, session, send_from_directory, url_for
 from flaskext.mysql import MySQL
+from flask_script import Manager
 from hashing_passwords import make_hash,check_hash
 import config_mysql
 import serial_read as publisher
 import os.path
+import os
 import subprocess
 import atexit
 
 app = Flask(__name__)
 app.secret_key = "Hello_this_is_a_secret_key"
 
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 3600
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 10
 mysql = MySQL()
+manager = Manager(app)
 
 app.config['MYSQL_DATABASE_USER']=config_mysql.USER
 app.config['MYSQL_DATABASE_PASSWORD'] = config_mysql.PASSWORD
@@ -27,9 +30,36 @@ PATH_TO_CREDENTIALS = os.path.join(app.root_path,"userData/credentials")
 PATH_TO_SENSOR_DATA = os.path.join(app.root_path,"userData/sensorData")
 
 
+
+
+
+def fetchCredentials():
+	result={"username":None,"password":None}
+	try:
+		with open(PATH_TO_CREDENTIALS,"r") as credentials:
+			data = credentials.read().rstrip("\n").split(",")
+			result["username"] = data[0]
+			result["password"] = data[1]
+			credentials.close()
+		print result
+	except Exception as e:
+		print str(e)
+	except IOError as io:
+		print str(io)
+	finally:
+		return result
+
 @app.route("/")
 def main():
-	return render_template('index.html')
+	credentials = fetchCredentials()
+	_username = credentials["username"]
+	_password = credentials["password"]
+	loginResponse = performLogin(_username,_password)
+	if loginResponse["error"]:
+		return render_template("index.html")
+	else:
+		setSession(loginResponse)
+		return redirect("/userHome")
 
 @app.route("/favicon.ico")
 def favicon():
@@ -37,44 +67,47 @@ def favicon():
 
 @app.route("/showSignUp")
 def showSignUp():
-	return render_template('signup.html')
+	return render_template("signup.html")
 
 @app.route("/showSignIn")
 def showSignIn():
-	return render_template('signin.html')
+	return render_template("signin.html")
 
 
-
+def showErrorPage(errorMessage):
+	return render_template("error.html",error=errorMessage)
 
 @app.route("/signUp",methods=["POST"])
 def signup():
-	conn = mysql.connect()
+	
 	try:	
 		_username = request.form["inputName"]
 		_password = request.form["inputPassword"]
-		print ('serving signup request for...')
-		if _username:
-			print 'for USER: '+_username
-		else:
-			print 'username is NULL'
-		
+		print ('serving signup request...')
+				
 		if _username and _password:
+			print "Username["+_username+"] password["+_password+"]"
+			conn = mysql.connect()
 			cursor = conn.cursor()
 			_hashed_password = make_hash(_password)
 			cursor.callproc('sp_createUser',(_username,_hashed_password,0))
 			data = cursor.fetchall()
+			print data
 
 			if len(data) is 0:
 				conn.commit()
-				return json.dumps({'message':'User created successfully'})
+				return redirect("/showSignIn")
+			#	return json.dumps({'message':'User created successfully'})
 			else:
-				return json.dumps({'error':str(data[0])})
+				return showErrorPage("Username already exists!!")
+#				return json.dumps({'error':str(data[0])})
+			conn.close()
 		else:
-			return json.dumps({'html':'<span>Enter the required fields</span>'})
+			return showErrorPage("Enter required field")
+#			return json.dumps({'html':'<span>Enter the required fields</span>'})
 	except Exception as e:
-		return json.dumps({'error':str(e)})
-	finally:
-		conn.close()
+		return showErrorPage(str(e))
+#		return json.dumps({'error':str(e)})
 
 
 def saveUserCredentials(username,password):
@@ -88,49 +121,65 @@ def saveUserCredentials(username,password):
 		print str(e)
 	except IOError as io:
 		print str(io)
+		
+		
+def performLogin(username,password):
+	result = {"error":True,"errorMessage":"Unknown error","user":0,"username":""}
+	try:
+		if username and password:
+			print "performing login operation: USER["+username+"] Password["+password+"]"
+			conn = mysql.connect()
+			cursor = conn.cursor()
+			cursor.callproc('sp_validateLogin',(username,))
+			data = cursor.fetchall()		
+		
+			if len(data)>0:
+				_storedPassword = data[0][2]
+				_storedUserId = data[0][0]
+				if check_hash(password,_storedPassword):
+					 result["error"]= False
+					 result["user"] = _storedUserId
+					 result["username"] = username
+					 result["errorMessage"] = ""
+				else:
+					result["errorMessage"]= "Username or Password is wrong!!"
+			else:
+				result["errorMessage"]="Username not found!!"
+				
+			conn.close()
+		else:
+			result["errorMessage"] = "Invalid data!!"
+	
+	except Exception as e:
+		print "error while logging in."
+		print str(e)
+		result["errorMessage"] = str(e)	
+	finally:
+		print result
+		return result	
+		
 
+def setSession(loginResponse):
+	session["user"] = loginResponse["user"]
+	session["username"] = loginResponse["username"]
 
 @app.route("/validateLogin",methods=["POST"])
 def validateLogin():
 	print "validating user..."
-	conn = mysql.connect()
+	
 	try:
 		_username = request.form["inputName"]
 		_password = request.form["inputPassword"]
-		if _username and _password:
-			print "performing sigin operation: USER["+_username+"] Password["+_password+"]"
-			cursor = conn.cursor()
-			cursor.callproc('sp_validateLogin',(_username,))
-		
-			data = cursor.fetchall()
-		
-			if len(data) > 0 :
-				print str(data)
-				if check_hash(_password,data[0][2]):
-					session["user"] = data[0][0]
-					session["username"] = _username
-					saveUserCredentials(_username,_password)
-					return redirect("/userHome")
-					#return json.dumps({'message':"User is successfully logged in..."})
-				else:
-					#redirect("/showSignIn")
-					return render_template("error.html",error="Username or password is wrong!!")
-					#return json.dumps({'error':"Username or Password is wrong!!"})
-			
-			else:
-				return render_template("error.html",error="Username not found!!")
-				#return json.dumps({'error':"Username not found!!"})
+		result = performLogin(_username,_password)		
+		if result["error"]:
+			return render_template("error.html",error=result["errorMessage"])     
 		else:
-			return render_template("error.html",error="Enter valid data")	
-                      # return json.dumps({'error':"Enter valid data"}) 
-		
+			setSession(result)
+			saveUserCredentials(_username,_password)
+			return redirect("/userHome")						
 	except Exception as e:
 		print "Exception"
 		return render_template("error.html",error=str(e))
-		#return json.dumps({'error':str(e)})
-	finally:
-		conn.close()
-
 		
 
 @app.route("/userHome" , methods=["GET"])
@@ -276,10 +325,34 @@ def getTopics():
 		#cursor.close()
 		#conn.close()
 
+
+
+def removeCredentials():
+	if os.path.isfile(PATH_TO_CREDENTIALS):
+		os.remove(PATH_TO_CREDENTIALS)
+		print "credentials removed."
+	else:
+		print "There is no credentials file."
+		
+def removeSensorData():
+	if os.path.isfile(PATH_TO_SENSOR_DATA):
+		os.remove(PATH_TO_SENSOR_DATA)
+		print "sensor data removed."
+	else:
+		print "There is no sensor data."	
+			
+			
 @app.route("/logout", methods=["GET"])
-def logout():
-	session.pop("user",None)
-	return redirect("/")
+def logout():	
+	try:
+		print "logging out..."
+		session.pop("user",None)
+		removeCredentials()
+		removeSensorData()		
+		return redirect("/")
+	except Exception as e:
+		print "problem in logging out"
+		print str(e)
 
 @app.route("/launchPublisher", methods=["POST"])
 def launchPublisher():
@@ -304,8 +377,9 @@ def launchPublisher():
 
 if __name__ == "__main__":
 	try:
-		app.run(debug = True)
+#		app.run(debug = True)
+		manager.run()
 	except Exception as e:
 		print "Error occured "+str(e)
 	finally:
-		print "quitting web framework"
+		print "quitting web framework..."

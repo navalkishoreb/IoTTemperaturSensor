@@ -1,0 +1,2 @@
+PORT = "/dev/ttyAMA0"
+BAUD_RATE = 9600
